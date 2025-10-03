@@ -225,94 +225,110 @@ def update_local_data(symbol: str):
 
 def plot_stock_chart(df: pd.DataFrame, symbol: str):
     from plotly.subplots import make_subplots
+    import numpy as np # <-- Đảm bảo đã import numpy
 
     df = df.reset_index(drop=True)
 
     df['MA50'] = df['Close'].rolling(window=50).mean()
     df['MA100'] = df['Close'].rolling(window=100).mean()
 
+    custom_data_for_hover = df[[
+        'Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'MA50', 'MA100'
+    ]].to_numpy()
+
+    # Chuyển đổi cột Date (cột đầu tiên, index 0) thành chuỗi định dạng sẵn
+    custom_data_for_hover[:, 0] = df['Date'].dt.strftime('%Y-%m-%d')
+
 
     # Tạo subplot với secondary_y
     fig = make_subplots(
-        rows=1, cols=1, 
-        specs=[[{"secondary_y": True}]], 
+        rows=1, cols=1,
+        specs=[[{"secondary_y": True}]],
         subplot_titles=(f'{symbol} - Giá và Khối lượng',)
     )
-    
+
     # Thêm biểu đồ nến (trục Y chính)
-    fig.add_trace(
-        go.Candlestick(
-            x=df.index,  
-            open=df["Open"], 
-            high=df["High"], 
-            low=df["Low"], 
-            close=df["Close"], 
-            name="Giá", 
-            customdata=df['Date'].dt.strftime('%Y-%m-%d'),
-            increasing_line_color="#189E54", 
-            decreasing_line_color="#C7211E",
-            hovertext=[
-                f"Date: {d.strftime('%Y-%m-%d')}<br>Open: {o:,.0f}<br>High: {h:,.0f}<br>Low: {l:,.0f}<br>Close: {c:,.0f}"
-                for d, o, h, l, c in zip(df['Date'], df['Open'], df['High'], df['Low'], df['Close'])
-            ],
-            hoverinfo="text"
-        ),
-        secondary_y=False  # Dùng trục Y chính
-    )
-    
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="Giá",
+        increasing_line_color="#189E54", decreasing_line_color="#C7211E",
+        hoverinfo='none'  # Tắt hover của biểu đồ nến
+    ), secondary_y=False)
+
+    # Thêm trace "vô hình" để kiểm soát hover
     fig.add_trace(go.Scatter(
-        x=df.index, 
-        y=df['MA50'], 
-        mode='lines', 
+        x=df.index,
+        y=df['Close'],  # hoặc vị trí bất kỳ để hover
+        mode='lines',
+        line=dict(color='rgba(0,0,0,0)', width=0),  # làm trace này trong suốt
+        showlegend=False,
+        customdata=custom_data_for_hover,  # <-- Bây giờ biến này đã tồn tại
+        hovertemplate=(
+            "<b>Date: %{customdata[0]}</b>"
+            "<br>Open: %{customdata[1]:,.0f}"
+            "<br>High: %{customdata[2]:,.0f}"
+            "<br>Low: %{customdata[3]:,.0f}"
+            "<br>Close: %{customdata[4]:,.0f}"
+            "<br>Volume: %{customdata[5]:,.0f}"
+            "<br>MA50: %{customdata[6]:,.1f}"
+            "<br>MA100: %{customdata[7]:,.1f}"
+            "<extra></extra>"  # Ẩn thông tin phụ
+        )
+    ))
+
+    # Thêm các trace còn lại (MA50, MA100, Volume)
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df['MA50'],
+        mode='lines',
         name='MA50',
-        line=dict(color='orange', width=1.5)
+        line=dict(color='orange', width=1.5),
+        hoverinfo='none' # Tắt hover để trace vô hình kiểm soát
     ))
 
     fig.add_trace(go.Scatter(
-        x=df.index, 
-        y=df['MA100'], 
-        mode='lines', 
+        x=df.index,
+        y=df['MA100'],
+        mode='lines',
         name='MA100',
-        line=dict(color='blue', width=1.5)
+        line=dict(color='blue', width=1.5),
+        hoverinfo='none' # Tắt hover để trace vô hình kiểm soát
     ))
 
-    # Thêm volume (trục Y phụ)
     if 'Volume' in df.columns and not df['Volume'].isna().all():
         colors_volume = [
-            '#C7211E' if row['Close'] < row['Open'] else '#189E54' 
+            '#C7211E' if row['Close'] < row['Open'] else '#189E54'
             for _, row in df.iterrows()
         ]
-        
         fig.add_trace(
             go.Bar(
-                x=df.index,  
-                y=df["Volume"], 
-                name="Khối lượng", 
-                marker=dict(color=colors_volume, opacity=0.5),  # Opacity thấp để không che giá
-                hovertemplate="Volume: %{y:,.0f}<extra></extra>"
+                x=df.index,
+                y=df["Volume"],
+                name="Khối lượng",
+                marker=dict(color=colors_volume, opacity=0.5),
+                hoverinfo='none' # Tắt hover để trace vô hình kiểm soát
             ),
-            secondary_y=True  # Dùng trục Y phụ
+            secondary_y=True
         )
-    
+
+
     num_ticks = 15
     tick_spacing = max(1, len(df) // num_ticks)
     tick_indices = df.index[::tick_spacing]
     tick_dates = df['Date'].dt.strftime('%Y-%m-%d')[::tick_spacing]
 
-     # Tối ưu range cho trục Y chính (giá)
     min_price = df["Low"].min()
     max_price = df["High"].max()
     price_range = max_price - min_price
     
-    padding = price_range * 0.1  # 10% padding
+    padding = price_range * 0.1
     y_max = max_price + padding
-    y_min = min_price - padding
+    y_min = max(0, min_price - padding)
 
-    # Tính range cho trục Y phụ (Volume)
     max_volume = df['Volume'].max() if 'Volume' in df.columns else 0
-    volume_y_max = max_volume * 5  # Scale lên 10 lần để volume không đè lên giá
+    volume_y_max = max_volume * 5
 
-    # Cập nhật trục X
     fig.update_xaxes(
         tickvals=tick_indices,
         ticktext=tick_dates,
@@ -322,10 +338,8 @@ def plot_stock_chart(df: pd.DataFrame, symbol: str):
         showline=True,
         linewidth=2,
         linecolor='black',
-        hoverformat=''
     )
     
-    # Cập nhật trục Y chính (Giá)
     fig.update_yaxes(
         title_text="Giá (VNĐ)",
         range=[y_min, y_max],
@@ -339,12 +353,11 @@ def plot_stock_chart(df: pd.DataFrame, symbol: str):
         secondary_y=False
     )
     
-    # Cập nhật trục Y phụ (Volume) với range mới
     fig.update_yaxes(
         title_text="Khối lượng",
-        range=[0, volume_y_max],  # Set range từ 0 đến max_volume * 10
+        range=[0, volume_y_max],
         fixedrange=True,
-        showgrid=False,  # Tắt lưới của trục phụ để không bị rối
+        showgrid=False,
         showline=True,
         linewidth=2,
         linecolor='black',
@@ -352,10 +365,9 @@ def plot_stock_chart(df: pd.DataFrame, symbol: str):
         secondary_y=True
     )
     
-    # Layout
     fig.update_layout(
-        height=700, 
-        hovermode='x unified', 
+        height=700,
+        hovermode='x unified',
         xaxis_rangeslider_visible=False,
         plot_bgcolor='white',
         paper_bgcolor='white',
@@ -367,8 +379,99 @@ def plot_stock_chart(df: pd.DataFrame, symbol: str):
             x=1
         )
     )
+
     return fig
 
+# Khởi tạo ứng dụng và layout 
+app = Dash(__name__)
+server = app.server
+app.layout = html.Div([
+    html.H1("📊 Lịch sử giá cổ phiếu", style={'textAlign': 'center'}),
+    html.Div([
+        dcc.Dropdown(id='ticker-dropdown', options=get_ticker_list(), placeholder="Chọn một mã", style={'width': '350px'}),
+        dcc.RadioItems(id='time-filter-radio', options=[{'label': '1M', 'value': '1M'}, {'label': '3M', 'value': '3M'}, {'label': '6M', 'value': '6M'}, {'label': '1Y', 'value': '1Y'}, {'label': '3Y', 'value': '3Y'}, {'label': 'All', 'value': 'All'}], value='1Y', labelStyle={'display': 'inline-block', 'marginRight': '10px'}),
+    ], style={'display': 'flex', 'justifyContent': 'center', 'gap': '20px', 'marginBottom': '20px'}),
+    dcc.Loading(id="loading-spinner", type="circle", children=html.Div(id='output-container'))
+], style={'padding': '20px'})
+
+
+# Callback
+@app.callback(
+    Output('output-container', 'children'),
+    [Input('ticker-dropdown', 'value'), Input('time-filter-radio', 'value')]
+)
+def update_graph(symbol, time_filter):
+    if not symbol:
+        return html.Div("Vui lòng chọn một mã cổ phiếu để bắt đầu.", style={'textAlign': 'center', 'marginTop': '50px'})
+    
+    update_local_data(symbol)
+    
+    file_path = os.path.join(DATA_DIR, f"{symbol}.csv")
+    if not os.path.exists(file_path):
+        return html.Div(f"⚠️ Không tìm thấy file dữ liệu cho mã {symbol}.", style={'textAlign': 'center', 'color': 'red'})
+
+    df_full = pd.read_csv(file_path, parse_dates=['Date'])
+
+    today_date = pd.to_datetime(datetime.now().date())
+    cutoff_date = today_date - timedelta(days=1)
+
+    df_full = df_full[df_full['Date'] <= cutoff_date].copy()
+
+    if df_full.empty:
+        return html.Div(f"⚠️ Dữ liệu cho mã {symbol} rỗng.", style={'textAlign': 'center', 'color': 'orange'})
+
+    today_marker = df_full['Date'].max()
+    reference_date = pd.to_datetime(today_marker).normalize()
+    start_date = None
+    if time_filter == "1M": 
+        start_date = reference_date - pd.DateOffset(months=1)
+    elif time_filter == "3M": 
+        start_date = reference_date - pd.DateOffset(months=3)
+    elif time_filter == "6M": 
+        start_date = reference_date - pd.DateOffset(months=6)
+    elif time_filter == "1Y": 
+        start_date = reference_date - pd.DateOffset(years=1)
+    elif time_filter == "3Y": 
+        start_date = reference_date - pd.DateOffset(years=3)
+
+    df_filtered = df_full[df_full["Date"] >= start_date].copy() if start_date else df_full.copy()
+
+    if df_filtered.empty:
+        return html.Div(
+            f"⚠️ Không có dữ liệu cho {symbol} trong khoảng thời gian đã chọn.", 
+            style={'textAlign': 'center'})
+
+    fig = plot_stock_chart(df_filtered, symbol)
+    df_display = df_filtered.sort_values("Date", ascending=False)
+    
+    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        if col in df_display.columns:
+            df_display[col] = pd.to_numeric(df_display[col]).round().astype(int)
+   
+
+    df_display['Date'] = df_display['Date'].dt.strftime('%Y-%m-%d')
+
+    desired_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+    
+    df_display = df_display[desired_columns]
+
+    
+    return html.Div([
+        dcc.Graph(figure=fig),
+        html.Details([
+            html.Summary('Xem bảng dữ liệu chi tiết'),
+            dash_table.DataTable(
+                columns=[{"name": i, "id": i} for i in df_display.columns], 
+                data=df_display.to_dict('records'), 
+                page_size=365, sort_action="native", 
+                filter_action="native", 
+                style_table={'overflowX': 'auto'})
+        ])
+    ])
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
 # Khởi tạo ứng dụng và layout 
 app = Dash(__name__)
 server = app.server
